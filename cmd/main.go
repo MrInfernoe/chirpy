@@ -27,31 +27,26 @@ func main() {
 	cfg.fileserverHits.Store(0)
 
 	serveMux := http.NewServeMux()
-	root := http.Dir(rootDir)
-	fileserverHandler := http.FileServer(root)
-	strippedFileserverHandler := http.StripPrefix(filepathExtension, fileserverHandler)
-	fileserverPattern := filepathExtension + "/"
-	serveMux.Handle(fileserverPattern, cfg.middlewareMetricsInc(strippedFileserverHandler))
+	strippedFileserverHandler := http.StripPrefix("/app", http.FileServer(http.Dir(rootDir)))
+	serveMux.Handle("/app/", cfg.middlewareMetricsInc(strippedFileserverHandler))
 
-	serveMux.HandleFunc("/healthz", func(resw http.ResponseWriter, req *http.Request) {
-		// write header
+	serveMux.HandleFunc(http.MethodGet+" /api/healthz", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
-		// status code
 		resw.WriteHeader(http.StatusOK)
-		// body
 		resw.Write([]byte("OK"))
 	})
 
-	serveMux.HandleFunc("/metrics", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
+	serveMux.HandleFunc(http.MethodGet+" /admin/metrics", func(resw http.ResponseWriter, req *http.Request) {
+		resw.Header().Add("Content-Type", "text/html")
 		resw.WriteHeader(http.StatusOK)
-		body := fmt.Sprintf("Hits: %v", cfg.fileserverHits.Load())
+		body := fmt.Sprintf("<html>\n<body>\n<h1>Welcome, Chirpy Admin</h1>\n<p>Chirpy has been visited %d times!</p>\n</body>\n</html>", cfg.fileserverHits.Load())
 		resw.Write([]byte(body))
 	})
 
-	serveMux.HandleFunc("/reset", func(resw http.ResponseWriter, req *http.Request) {
+	serveMux.HandleFunc(http.MethodPost+" /admin/reset", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
+		cfg.fileserverHits.Store(0)
 		body := "Hits reset to 0"
 		resw.Write([]byte(body))
 	})
