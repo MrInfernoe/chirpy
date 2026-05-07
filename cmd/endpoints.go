@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 func handlerHealth(sm *http.ServeMux, _ *apiConfig) {
@@ -39,10 +40,6 @@ func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
 			Body string `json:"body"`
 		}
 
-		type validChirp struct {
-			Valid bool `json:"valid"`
-		}
-
 		type errChirp struct {
 			Error string `json:"error"`
 		}
@@ -61,8 +58,6 @@ func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
 			}
 			resw.Write(data)
 
-			// resw.Write(fmt.Append([]byte{}, fmt.Sprintf("{\n%v\n}", err)))
-
 		} else if len(vPs.Body) > 140 {
 			resw.WriteHeader(http.StatusBadRequest)
 			resBody := errChirp{Error: "Chirp is too long"}
@@ -72,8 +67,6 @@ func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
 			}
 			resw.Write(data)
 
-			// resw.Write(fmt.Append([]byte{}, "{\n\"error\": \"Chirp is too long\"\n}"))
-
 		} else if len(vPs.Body) == 0 {
 			resw.WriteHeader(http.StatusBadRequest)
 			resBody := errChirp{Error: "Chirp is empty"}
@@ -82,11 +75,26 @@ func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
 				fmt.Printf("error encoding response: %v\n", err)
 			}
 			resw.Write(data)
-			// resw.Write(fmt.Append([]byte{}, "{\n\"error\": \"Chirp is empty\"\n}"))
 
 		} else {
 			resw.WriteHeader(http.StatusOK)
-			resBody := validChirp{Valid: true}
+
+			reqBody := vPs.Body
+
+			for _, profanity := range []string{"kerfuffle", "sharbert", "fornax"} {
+				for {
+					profanityIndex := strings.Index(strings.ToLower(reqBody), profanity)
+					if profanityIndex == -1 {
+						break
+					}
+					reqBody = reqBody[:profanityIndex] + "****" + reqBody[profanityIndex+len(profanity):]
+				}
+			}
+			resBody := struct {
+				Cleaned_Body string `json:"cleaned_body"`
+			}{
+				Cleaned_Body: reqBody,
+			}
 			data, err := json.Marshal(resBody)
 			if err != nil {
 				fmt.Printf("error encoding response: %v\n", err)
