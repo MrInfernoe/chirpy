@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func handlerHealth(sm *http.ServeMux, _ *apiConfig) {
+func endpointHealth(sm *http.ServeMux, _ *apiConfig) {
 	sm.HandleFunc(http.MethodGet+" /api/healthz", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
@@ -15,7 +15,7 @@ func handlerHealth(sm *http.ServeMux, _ *apiConfig) {
 	})
 }
 
-func handlerMetrics(sm *http.ServeMux, cfg *apiConfig) {
+func endpointMetrics(sm *http.ServeMux, cfg *apiConfig) {
 	sm.HandleFunc(http.MethodGet+" /admin/metrics", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Add("Content-Type", "text/html")
 		resw.WriteHeader(http.StatusOK)
@@ -24,7 +24,7 @@ func handlerMetrics(sm *http.ServeMux, cfg *apiConfig) {
 	})
 }
 
-func handlerReset(sm *http.ServeMux, cfg *apiConfig) {
+func endpointReset(sm *http.ServeMux, cfg *apiConfig) {
 	sm.HandleFunc(http.MethodPost+" /admin/reset", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
@@ -34,7 +34,7 @@ func handlerReset(sm *http.ServeMux, cfg *apiConfig) {
 	})
 }
 
-func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
+func endpointValidate(sm *http.ServeMux, _ *apiConfig) {
 	sm.HandleFunc(http.MethodPost+" /api/validate_chirp", func(resw http.ResponseWriter, req *http.Request) {
 		type validateParameters struct {
 			Body string `json:"body"`
@@ -101,5 +101,23 @@ func handlerValidate(sm *http.ServeMux, _ *apiConfig) {
 			}
 			resw.Write(data)
 		}
+	})
+}
+
+func endpointUsers(sm *http.ServeMux, cfg *apiConfig) {
+
+	sm.HandleFunc(http.MethodPost+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
+
+		decoder := json.NewDecoder(req.Body)
+		jsonData := struct {
+			Email string `json:"email"`
+		}{}
+		err := decoder.Decode(&jsonData)
+		if err != nil {
+			fmt.Printf("error decoding request: %v\n", err)
+		}
+
+		resw.Header().Add("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusOK)
 	})
 }

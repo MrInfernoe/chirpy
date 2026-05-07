@@ -50,10 +50,10 @@ func main() {
 	strippedFileserverHandler := http.StripPrefix(fpExt, http.FileServer(http.Dir(rootDir)))
 	serveMux.Handle(fpExt+"/", cfg.middlewareMetricsInc(strippedFileserverHandler))
 
-	handlerHealth(serveMux, cfg)
-	handlerMetrics(serveMux, cfg)
-	handlerReset(serveMux, cfg)
-	handlerValidate(serveMux, cfg)
+	endpointHealth(serveMux, cfg)
+	endpointMetrics(serveMux, cfg)
+	endpointReset(serveMux, cfg)
+	endpointValidate(serveMux, cfg)
 
 	server := http.Server{}
 	server.Addr = port
