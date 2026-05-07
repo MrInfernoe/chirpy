@@ -1,13 +1,20 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"net/http"
+	"os"
 	"sync/atomic"
+
+	"github.com/MrInfernoe/Chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQ            *database.Queries
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -18,17 +25,30 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 
 func main() {
-	// matches the URL of each incoming request against a list of registered patterns and calls the handler for the pattern that most closely matches the URL.
 	const rootDir = "./web/static"
 	const port = ":8080"
-	const filepathExtension = "/app"
+	const fpExt = "/app"
+
+	err := godotenv.Load(".env")
+	if err != nil {
+		fmt.Printf("error loading env: %v\n", err)
+		os.Exit(1)
+	}
+
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		fmt.Printf("error opening database: %v\n", err)
+		os.Exit(1)
+	}
 
 	cfg := &apiConfig{}
 	cfg.fileserverHits.Store(0)
+	cfg.dbQ = database.New(db)
 
 	serveMux := http.NewServeMux()
-	strippedFileserverHandler := http.StripPrefix("/app", http.FileServer(http.Dir(rootDir)))
-	serveMux.Handle("/app/", cfg.middlewareMetricsInc(strippedFileserverHandler))
+	strippedFileserverHandler := http.StripPrefix(fpExt, http.FileServer(http.Dir(rootDir)))
+	serveMux.Handle(fpExt+"/", cfg.middlewareMetricsInc(strippedFileserverHandler))
 
 	handlerHealth(serveMux, cfg)
 	handlerMetrics(serveMux, cfg)
@@ -39,10 +59,11 @@ func main() {
 	server.Addr = port
 	server.Handler = serveMux
 
-	err := server.ListenAndServe()
+	err = server.ListenAndServe()
 	if err == http.ErrServerClosed {
 		fmt.Println("server closed")
 	} else {
-		fmt.Println(err)
+		fmt.Printf("error from listening or serving: %v\n", err)
+		os.Exit(1)
 	}
 }

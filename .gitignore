@@ -1,2 +1,8 @@
 apiconfig
 serverRunAndTest.sh
+databaseConnect.sh
+databaseMigrations.sh
+
+cmd/cmd
+# secrets
+.env
