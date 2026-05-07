@@ -30,26 +30,10 @@ func main() {
 	strippedFileserverHandler := http.StripPrefix("/app", http.FileServer(http.Dir(rootDir)))
 	serveMux.Handle("/app/", cfg.middlewareMetricsInc(strippedFileserverHandler))
 
-	serveMux.HandleFunc(http.MethodGet+" /api/healthz", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
-		resw.WriteHeader(http.StatusOK)
-		resw.Write([]byte("OK"))
-	})
-
-	serveMux.HandleFunc(http.MethodGet+" /admin/metrics", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/html")
-		resw.WriteHeader(http.StatusOK)
-		body := fmt.Sprintf("<html>\n<body>\n<h1>Welcome, Chirpy Admin</h1>\n<p>Chirpy has been visited %d times!</p>\n</body>\n</html>", cfg.fileserverHits.Load())
-		resw.Write([]byte(body))
-	})
-
-	serveMux.HandleFunc(http.MethodPost+" /admin/reset", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
-		resw.WriteHeader(http.StatusOK)
-		cfg.fileserverHits.Store(0)
-		body := "Hits reset to 0"
-		resw.Write([]byte(body))
-	})
+	handlerHealth(serveMux, cfg)
+	handlerMetrics(serveMux, cfg)
+	handlerReset(serveMux, cfg)
+	handlerValidate(serveMux, cfg)
 
 	server := http.Server{}
 	server.Addr = port
