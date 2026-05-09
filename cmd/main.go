@@ -5,24 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"sync/atomic"
 
+	"github.com/MrInfernoe/Chirpy/internal/appCmds"
 	"github.com/MrInfernoe/Chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
-
-type apiConfig struct {
-	fileserverHits atomic.Int32
-	dbQ            *database.Queries
-}
-
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(resw http.ResponseWriter, req *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(resw, req)
-	})
-}
 
 func main() {
 	const rootDir = "./web/static"
@@ -35,25 +23,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	dbURL := os.Getenv("DB_URL")
-	db, err := sql.Open("postgres", dbURL)
+	state := &appCmds.State{}
+	state.Config = &appCmds.ApiConfig{}
+	state.DbQ = &database.Queries{}
+
+	state.Config.Platform = os.Getenv("PLATFORM")
+	state.Config.DbURL = os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", state.Config.DbURL)
 	if err != nil {
 		fmt.Printf("error opening database: %v\n", err)
 		os.Exit(1)
 	}
 
-	cfg := &apiConfig{}
-	cfg.fileserverHits.Store(0)
-	cfg.dbQ = database.New(db)
+	state.Config.FileserverHits.Store(0)
+	state.DbQ = database.New(db)
 
 	serveMux := http.NewServeMux()
 	strippedFileserverHandler := http.StripPrefix(fpExt, http.FileServer(http.Dir(rootDir)))
-	serveMux.Handle(fpExt+"/", cfg.middlewareMetricsInc(strippedFileserverHandler))
+	serveMux.Handle(fpExt+"/", state.Config.MiddlewareMetricsInc(strippedFileserverHandler))
 
-	endpointHealth(serveMux, cfg)
-	endpointMetrics(serveMux, cfg)
-	endpointReset(serveMux, cfg)
-	endpointValidate(serveMux, cfg)
+	endpointHealth(serveMux, state)
+	endpointMetrics(serveMux, state)
+	endpointReset(serveMux, state)
+	// endpointValidate(serveMux, state)
+	endpointUsers(serveMux, state)
+	endpointChirps(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port

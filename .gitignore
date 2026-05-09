@@ -1,5 +1,6 @@
 apiconfig
-serverRunAndTest.sh
+serverStart.sh
+serverTest.sh
 databaseConnect.sh
 databaseMigrations.sh
 

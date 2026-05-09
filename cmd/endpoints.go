@@ -5,36 +5,74 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/MrInfernoe/Chirpy/internal/appCmds"
+	"github.com/MrInfernoe/Chirpy/internal/database"
 )
 
-func endpointHealth(sm *http.ServeMux, _ *apiConfig) {
+func errServer(resw http.ResponseWriter, errString string, err error) {
+	errMessage := fmt.Sprintf("%v: %v\n", errString, err)
+	fmt.Println(errMessage)
+	resw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	resw.WriteHeader(http.StatusInternalServerError)
+	resw.Write([]byte(errMessage))
+}
+
+func errClient(resw http.ResponseWriter, errString string) {
+	// errMessage := fmt.Sprintf("%v: %v\n", errString, err)
+	errMessage := errString
+	fmt.Println(errMessage)
+	resw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	resw.WriteHeader(http.StatusBadRequest)
+	resw.Write([]byte(errMessage))
+}
+
+func endpointHealth(sm *http.ServeMux, s *appCmds.State) {
 	sm.HandleFunc(http.MethodGet+" /api/healthz", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
+		resw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
 		resw.Write([]byte("OK"))
 	})
 }
 
-func endpointMetrics(sm *http.ServeMux, cfg *apiConfig) {
+func endpointMetrics(sm *http.ServeMux, s *appCmds.State) {
 	sm.HandleFunc(http.MethodGet+" /admin/metrics", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/html")
+		resw.Header().Set("Content-Type", "text/html")
 		resw.WriteHeader(http.StatusOK)
-		body := fmt.Sprintf("<html>\n<body>\n<h1>Welcome, Chirpy Admin</h1>\n<p>Chirpy has been visited %d times!</p>\n</body>\n</html>", cfg.fileserverHits.Load())
-		resw.Write([]byte(body))
+		resBody := fmt.Sprintf("<html>\n<body>\n<h1>Welcome, Chirpy Admin</h1>\n<p>Chirpy has been visited %d times!</p>\n</body>\n</html>", s.Config.FileserverHits.Load())
+		resw.Write([]byte(resBody))
 	})
 }
 
-func endpointReset(sm *http.ServeMux, cfg *apiConfig) {
+func endpointReset(sm *http.ServeMux, s *appCmds.State) {
 	sm.HandleFunc(http.MethodPost+" /admin/reset", func(resw http.ResponseWriter, req *http.Request) {
-		resw.Header().Add("Content-Type", "text/plain; charset=utf-8")
+		if s.Config.Platform != "dev" {
+			resw.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		s.Config.FileserverHits.Store(0)
+		fmt.Println("Hits reset to zero.")
+
+		err := s.DbQ.ResetUsers(req.Context())
+		if err != nil {
+			// errMessage := fmt.Sprintf("could not reset users: %v\n", err)
+			// fmt.Println(errMessage)
+			// resw.Header().Set("Content-type", "text/plain")
+			// resw.WriteHeader(500)
+			// resw.Write([]byte(errMessage))
+			errServer(resw, "could not reset users", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
-		cfg.fileserverHits.Store(0)
-		body := "Hits reset to 0"
-		resw.Write([]byte(body))
+		resBody := "Hits reset to 0. Users database reset."
+		resw.Write([]byte(resBody))
 	})
 }
 
-func endpointValidate(sm *http.ServeMux, _ *apiConfig) {
+func endpointValidate_deprecated(sm *http.ServeMux, s *appCmds.State) {
 	sm.HandleFunc(http.MethodPost+" /api/validate_chirp", func(resw http.ResponseWriter, req *http.Request) {
 		type validateParameters struct {
 			Body string `json:"body"`
@@ -47,7 +85,7 @@ func endpointValidate(sm *http.ServeMux, _ *apiConfig) {
 		decoder := json.NewDecoder(req.Body)
 		var vPs validateParameters
 		err := decoder.Decode(&vPs)
-		resw.Header().Add("Content-Type", "application/json")
+		resw.Header().Set("Content-Type", "application/json")
 
 		if err != nil {
 			resw.WriteHeader(http.StatusBadRequest)
@@ -104,20 +142,170 @@ func endpointValidate(sm *http.ServeMux, _ *apiConfig) {
 	})
 }
 
-func endpointUsers(sm *http.ServeMux, cfg *apiConfig) {
+func endpointUsers(sm *http.ServeMux, s *appCmds.State) {
 
 	sm.HandleFunc(http.MethodPost+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
 
-		decoder := json.NewDecoder(req.Body)
-		jsonData := struct {
+		reqData := struct {
 			Email string `json:"email"`
 		}{}
-		err := decoder.Decode(&jsonData)
+		decoder := json.NewDecoder(req.Body)
+		err := decoder.Decode(&reqData)
 		if err != nil {
-			fmt.Printf("error decoding request: %v\n", err)
+			// errMessage := fmt.Sprintf("could not decode: %v\n", err)
+			// fmt.Println(errMessage)
+			// resw.Header().Set("Conte")
+			// resw.WriteHeader(500) // server error
+			errServer(resw, "could not decode", err)
+			return
 		}
 
-		resw.Header().Add("Content-Type", "application/json")
-		resw.WriteHeader(http.StatusOK)
+		createdUser, err := s.DbQ.CreateUser(req.Context(), reqData.Email)
+		if err != nil {
+			// conflict if (i know almost impossible) duplicate user_id generated
+			// retry will pass through
+			// fmt.Printf("error creating user: %v\n", err)
+			errServer(resw, "could not create user", err)
+			return
+		}
+
+		resData, err := json.Marshal(&createdUser)
+		if err != nil {
+			// fmt.Printf("error encoding user: %v\n", err)
+			errServer(resw, "could not encode response", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusCreated)
+		resw.Write(resData)
 	})
 }
+
+func endpointChirps(sm *http.ServeMux, s *appCmds.State) {
+	sm.HandleFunc(http.MethodPost+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
+
+		// type errChirp struct {
+		// 	Error string `json:"error"`
+		// }
+
+		var reqData database.CreateChirpParams
+		decoder := json.NewDecoder(req.Body)
+		err := decoder.Decode(&reqData)
+		if err != nil {
+			errServer(resw, "could not decode request", err)
+			return
+		}
+
+		if len(reqData.Body) > 140 {
+			errClient(resw, "Chirp too long")
+			return
+		}
+		if len(reqData.Body) == 0 {
+			errClient(resw, "Chirp empty")
+			return
+		}
+
+		reqBody := reqData.Body
+		for _, profanity := range []string{"kerfuffle", "sharbert", "fornax"} {
+			for {
+				profanityIndex := strings.Index(strings.ToLower(reqBody), profanity)
+				if profanityIndex == -1 {
+					break
+				}
+				reqBody = reqBody[:profanityIndex] + "****" + reqBody[profanityIndex+len(profanity):]
+			}
+		}
+
+		chirpParams := database.CreateChirpParams{Body: reqBody, UserID: reqData.UserID}
+		createdChirp, err := s.DbQ.CreateChirp(req.Context(), chirpParams)
+		if err != nil {
+			errServer(resw, "could not create user", err)
+			return
+		}
+
+		resData, err := json.Marshal(&createdChirp)
+		if err != nil {
+			errServer(resw, "could not encode response", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusCreated)
+		resw.Write(resData)
+	})
+}
+
+const oldy = `{
+// 		// old seperator
+// {
+// 		// resw.Header().Set("Content-Type", "application/json")
+
+// 		// if err != nil {
+// 		// 	resw.WriteHeader(http.StatusBadRequest)
+// 		// 	resBody := errChirp{Error: err.Error()}
+// 		// 	data, err := json.Marshal(resBody)
+// 		// 	if err != nil {
+// 		// 		fmt.Printf("error encoding response: %v\n", err)
+// 		// 		return
+// 		// 	}
+// 		// 	resw.Write(data)
+
+// 		// } else
+// 		// if len(reqData.Body) > 140 {
+// 		// 	resw.WriteHeader(http.StatusBadRequest)
+// 		// 	resBody := errChirp{Error: "Chirp is too long"}
+// 		// 	data, err := json.Marshal(resBody)
+// 		// 	if err != nil {
+// 		// 		fmt.Printf("error encoding response: %v\n", err)
+// 		// 		return
+// 		// 	}
+// 		// 	resw.Write(data)
+
+// 		// } else if len(jsonData.Body) == 0 {
+// 		// 	resw.WriteHeader(http.StatusBadRequest)
+// 		// 	resBody := errChirp{Error: "Chirp is empty"}
+// 		// 	data, err := json.Marshal(resBody)
+// 		// 	if err != nil {
+// 		// 		fmt.Printf("error encoding response: %v\n", err)
+// 		// 		return
+// 		// 	}
+// 		// 	resw.Write(data)
+	
+// 		} else {
+// 			reqBody := reqData.Body
+// 			for _, profanity := range []string{"kerfuffle", "sharbert", "fornax"} {
+// 				for {
+// 					profanityIndex := strings.Index(strings.ToLower(reqBody), profanity)
+// 					if profanityIndex == -1 {
+// 						break
+// 					}
+// 					reqBody = reqBody[:profanityIndex] + "****" + reqBody[profanityIndex+len(profanity):]
+// 				}
+// 			}
+
+// 			chirpParams := database.CreateChirpParams{Body: reqBody, UserID: jsonData.Id}
+// 			createdChirp, err := s.DbQ.CreateChirp(req.Context(), chirpParams)
+// 			if err != nil {
+// 				fmt.Printf("error creating chirp in database: %v", err)
+// 				return
+// 			}
+
+// }
+// 			resw.WriteHeader(http.StatusCreated)
+
+// 			err = json.NewEncoder(resw).Encode(&createdChirp)
+// 			if err != nil {
+// 				fmt.Printf("error creating encoder: %v\n", err)
+// 			}
+// 			// resData, err := json.Marshal(createdChirp)
+// 			// if err != nil {
+// 			// 	fmt.Printf("error encoding response: %v\n", err)
+// 			// 	return
+// 			// }
+
+// 			// resw.Write(resData)
+// 		}
+// 	})
+// }
+}`
