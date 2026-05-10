@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/MrInfernoe/Chirpy/internal/appCmds"
 	"github.com/MrInfernoe/Chirpy/internal/database"
+	"github.com/google/uuid"
 )
 
 func errServer(resw http.ResponseWriter, errString string, err error) {
@@ -27,7 +27,7 @@ func errClient(resw http.ResponseWriter, errString string) {
 	resw.Write([]byte(errMessage))
 }
 
-func endpointHealth(sm *http.ServeMux, s *appCmds.State) {
+func endpointHealth(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodGet+" /api/healthz", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		resw.WriteHeader(http.StatusOK)
@@ -35,7 +35,7 @@ func endpointHealth(sm *http.ServeMux, s *appCmds.State) {
 	})
 }
 
-func endpointMetrics(sm *http.ServeMux, s *appCmds.State) {
+func endpointMetrics(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodGet+" /admin/metrics", func(resw http.ResponseWriter, req *http.Request) {
 		resw.Header().Set("Content-Type", "text/html")
 		resw.WriteHeader(http.StatusOK)
@@ -44,7 +44,7 @@ func endpointMetrics(sm *http.ServeMux, s *appCmds.State) {
 	})
 }
 
-func endpointReset(sm *http.ServeMux, s *appCmds.State) {
+func endpointReset(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodPost+" /admin/reset", func(resw http.ResponseWriter, req *http.Request) {
 		if s.Config.Platform != "dev" {
 			resw.WriteHeader(http.StatusForbidden)
@@ -52,7 +52,6 @@ func endpointReset(sm *http.ServeMux, s *appCmds.State) {
 		}
 
 		s.Config.FileserverHits.Store(0)
-		fmt.Println("Hits reset to zero.")
 
 		err := s.DbQ.ResetUsers(req.Context())
 		if err != nil {
@@ -72,7 +71,7 @@ func endpointReset(sm *http.ServeMux, s *appCmds.State) {
 	})
 }
 
-func endpointValidate_deprecated(sm *http.ServeMux, s *appCmds.State) {
+func endpointValidate_depreciated(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodPost+" /api/validate_chirp", func(resw http.ResponseWriter, req *http.Request) {
 		type validateParameters struct {
 			Body string `json:"body"`
@@ -142,7 +141,7 @@ func endpointValidate_deprecated(sm *http.ServeMux, s *appCmds.State) {
 	})
 }
 
-func endpointUsers(sm *http.ServeMux, s *appCmds.State) {
+func endpointUsers(sm *http.ServeMux, s *State) {
 
 	sm.HandleFunc(http.MethodPost+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
 
@@ -182,7 +181,7 @@ func endpointUsers(sm *http.ServeMux, s *appCmds.State) {
 	})
 }
 
-func endpointChirps(sm *http.ServeMux, s *appCmds.State) {
+func endpointChirps(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodPost+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
 
 		// type errChirp struct {
@@ -217,10 +216,11 @@ func endpointChirps(sm *http.ServeMux, s *appCmds.State) {
 			}
 		}
 
-		chirpParams := database.CreateChirpParams{Body: reqBody, UserID: reqData.UserID}
-		createdChirp, err := s.DbQ.CreateChirp(req.Context(), chirpParams)
+		// chirpParams := database.CreateChirpParams{Body: reqBody, UserID: reqData.UserID}
+		reqData.Body = reqBody
+		createdChirp, err := s.DbQ.CreateChirp(req.Context(), reqData)
 		if err != nil {
-			errServer(resw, "could not create user", err)
+			errServer(resw, "could not create chirp", err)
 			return
 		}
 
@@ -232,6 +232,71 @@ func endpointChirps(sm *http.ServeMux, s *appCmds.State) {
 
 		resw.Header().Set("Content-Type", "application/json")
 		resw.WriteHeader(http.StatusCreated)
+		resw.Write(resData)
+	})
+}
+
+func endpointGetChirps(sm *http.ServeMux, s *State) {
+	sm.HandleFunc(http.MethodGet+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
+
+		chirps, err := s.DbQ.GetChirps(req.Context())
+		if err != nil {
+			errServer(resw, "could not get chirps", err)
+			return
+		}
+
+		resData, err := json.Marshal(&chirps)
+		if err != nil {
+			errServer(resw, "could not encode chirps", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusOK)
+		resw.Write(resData)
+	})
+}
+
+func endpointGetChirp(sm *http.ServeMux, s *State) {
+	sm.HandleFunc(http.MethodGet+" /api/chirps/{chirp_id}", func(resw http.ResponseWriter, req *http.Request) {
+
+		// get chirp id from request pattern
+		chirp_id_string := req.PathValue("chirp_id")
+
+		// check if chirp id is not empty
+		if chirp_id_string == "" {
+			errClient(resw, "no chirp id given")
+			return
+		}
+
+		// convert to uuid
+		chirp_id, err := uuid.Parse(chirp_id_string)
+		if err != nil {
+			errServer(resw, "could not parse string", err)
+			return
+		}
+
+		// error here --------------------------------------
+		// get chirp from database
+		chirp, err := s.DbQ.GetChirp(req.Context(), chirp_id)
+		if err != nil {
+			if err.Error() == "sql: no rows in result set" {
+				http.Error(resw, "chirp not found", http.StatusNotFound)
+				return
+			}
+			errServer(resw, "could not get chirp", err)
+			return
+		}
+
+		// encode chirp
+		resData, err := json.Marshal(&chirp)
+		if err != nil {
+			errServer(resw, "could not encode response", err)
+		}
+
+		// write response
+		resw.Header().Set("Content-type", "application/json")
+		resw.WriteHeader(http.StatusOK)
 		resw.Write(resData)
 	})
 }

@@ -1,4 +1,4 @@
-package appCmds
+package main
 
 import (
 	"fmt"

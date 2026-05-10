@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/MrInfernoe/Chirpy/internal/appCmds"
 	"github.com/MrInfernoe/Chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -19,19 +18,19 @@ func main() {
 
 	err := godotenv.Load(".env")
 	if err != nil {
-		fmt.Printf("error loading env: %v\n", err)
+		fmt.Printf("could not load env: %v\n", err)
 		os.Exit(1)
 	}
 
-	state := &appCmds.State{}
-	state.Config = &appCmds.ApiConfig{}
+	state := &State{}
+	state.Config = &ApiConfig{}
 	state.DbQ = &database.Queries{}
 
 	state.Config.Platform = os.Getenv("PLATFORM")
 	state.Config.DbURL = os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", state.Config.DbURL)
 	if err != nil {
-		fmt.Printf("error opening database: %v\n", err)
+		fmt.Printf("could not open database: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -48,6 +47,8 @@ func main() {
 	// endpointValidate(serveMux, state)
 	endpointUsers(serveMux, state)
 	endpointChirps(serveMux, state)
+	endpointGetChirps(serveMux, state)
+	endpointGetChirp(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port
@@ -57,7 +58,7 @@ func main() {
 	if err == http.ErrServerClosed {
 		fmt.Println("server closed")
 	} else {
-		fmt.Printf("error from listening or serving: %v\n", err)
+		fmt.Printf("could not inititate handling: %v\n", err)
 		os.Exit(1)
 	}
 }
