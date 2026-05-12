@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/MrInfernoe/Chirpy/internal/auth"
 	"github.com/MrInfernoe/Chirpy/internal/database"
 	"github.com/google/uuid"
 )
@@ -145,9 +146,11 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 
 	sm.HandleFunc(http.MethodPost+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
 
-		reqData := struct {
-			Email string `json:"email"`
-		}{}
+		reqData := database.CreateUserParams{}
+		// reqData := struct {
+		// 	Email    string `json:"email"`
+		// 	Password string `json:"password"`
+		// }{}
 		decoder := json.NewDecoder(req.Body)
 		err := decoder.Decode(&reqData)
 		if err != nil {
@@ -159,7 +162,16 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 			return
 		}
 
-		createdUser, err := s.DbQ.CreateUser(req.Context(), reqData.Email)
+		if reqData.Password == "" {
+			http.Error(resw, "password is empty", http.StatusBadRequest)
+		}
+
+		reqData.Password, err = auth.HashPassword(reqData.Password)
+		if err != nil {
+			errServer(resw, "could not hash password", err)
+		}
+
+		createdUser, err := s.DbQ.CreateUser(req.Context(), reqData)
 		if err != nil {
 			// conflict if (i know almost impossible) duplicate user_id generated
 			// retry will pass through
@@ -301,76 +313,51 @@ func endpointGetChirp(sm *http.ServeMux, s *State) {
 	})
 }
 
-const oldy = `{
-// 		// old seperator
-// {
-// 		// resw.Header().Set("Content-Type", "application/json")
+func endpointLogin(sm *http.ServeMux, s *State) {
+	sm.HandleFunc(http.MethodPost+" /api/login", func(resw http.ResponseWriter, req *http.Request) {
 
-// 		// if err != nil {
-// 		// 	resw.WriteHeader(http.StatusBadRequest)
-// 		// 	resBody := errChirp{Error: err.Error()}
-// 		// 	data, err := json.Marshal(resBody)
-// 		// 	if err != nil {
-// 		// 		fmt.Printf("error encoding response: %v\n", err)
-// 		// 		return
-// 		// 	}
-// 		// 	resw.Write(data)
+		var reqData database.CreateUserParams
+		decoder := json.NewDecoder(req.Body)
+		err := decoder.Decode(&reqData)
+		if err != nil {
+			errServer(resw, "could not decode: %v\n", err)
+			return
+		}
 
-// 		// } else
-// 		// if len(reqData.Body) > 140 {
-// 		// 	resw.WriteHeader(http.StatusBadRequest)
-// 		// 	resBody := errChirp{Error: "Chirp is too long"}
-// 		// 	data, err := json.Marshal(resBody)
-// 		// 	if err != nil {
-// 		// 		fmt.Printf("error encoding response: %v\n", err)
-// 		// 		return
-// 		// 	}
-// 		// 	resw.Write(data)
+		userWithPassword, err := s.DbQ.GetUserWithPassword(req.Context(), reqData.Email)
 
-// 		// } else if len(jsonData.Body) == 0 {
-// 		// 	resw.WriteHeader(http.StatusBadRequest)
-// 		// 	resBody := errChirp{Error: "Chirp is empty"}
-// 		// 	data, err := json.Marshal(resBody)
-// 		// 	if err != nil {
-// 		// 		fmt.Printf("error encoding response: %v\n", err)
-// 		// 		return
-// 		// 	}
-// 		// 	resw.Write(data)
-	
-// 		} else {
-// 			reqBody := reqData.Body
-// 			for _, profanity := range []string{"kerfuffle", "sharbert", "fornax"} {
-// 				for {
-// 					profanityIndex := strings.Index(strings.ToLower(reqBody), profanity)
-// 					if profanityIndex == -1 {
-// 						break
-// 					}
-// 					reqBody = reqBody[:profanityIndex] + "****" + reqBody[profanityIndex+len(profanity):]
-// 				}
-// 			}
+		// check if err not nil
+		if err != nil {
+			// check if found from email
+			if err.Error() != "not found" {
+				http.Error(resw, "incorrect password or email", http.StatusUnauthorized)
+				return
+			}
+			errServer(resw, "could not get user: err", err)
+			return
+		}
 
-// 			chirpParams := database.CreateChirpParams{Body: reqBody, UserID: jsonData.Id}
-// 			createdChirp, err := s.DbQ.CreateChirp(req.Context(), chirpParams)
-// 			if err != nil {
-// 				fmt.Printf("error creating chirp in database: %v", err)
-// 				return
-// 			}
+		// check password hash
+		same, err := auth.CheckPasswordHash(reqData.Password, userWithPassword.Password)
+		if err != nil {
+			errServer(resw, "could not check hash", err)
+			return
+		}
 
-// }
-// 			resw.WriteHeader(http.StatusCreated)
+		if !same {
+			http.Error(resw, "incorrect password or email", http.StatusUnauthorized)
+			return
+		}
 
-// 			err = json.NewEncoder(resw).Encode(&createdChirp)
-// 			if err != nil {
-// 				fmt.Printf("error creating encoder: %v\n", err)
-// 			}
-// 			// resData, err := json.Marshal(createdChirp)
-// 			// if err != nil {
-// 			// 	fmt.Printf("error encoding response: %v\n", err)
-// 			// 	return
-// 			// }
+		userWithoutPassword := database.CreateUserRow{ID: userWithPassword.ID, CreatedAt: userWithPassword.CreatedAt, UpdatedAt: userWithPassword.UpdatedAt, Email: userWithPassword.Email}
+		reswData, err := json.Marshal(&userWithoutPassword)
+		if err != nil {
+			errServer(resw, "could not encode response", err)
+			return
+		}
 
-// 			// resw.Write(resData)
-// 		}
-// 	})
-// }
-}`
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusOK)
+		resw.Write(reswData)
+	})
+}

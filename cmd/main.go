@@ -49,6 +49,7 @@ func main() {
 	endpointChirps(serveMux, state)
 	endpointGetChirps(serveMux, state)
 	endpointGetChirp(serveMux, state)
+	endpointLogin(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port
