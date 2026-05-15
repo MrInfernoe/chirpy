@@ -28,6 +28,7 @@ func main() {
 
 	state.Config.Platform = os.Getenv("PLATFORM")
 	state.Config.DbURL = os.Getenv("DB_URL")
+	state.Config.TokenSecret = os.Getenv("TOKEN_SECRET")
 	db, err := sql.Open("postgres", state.Config.DbURL)
 	if err != nil {
 		fmt.Printf("could not open database: %v\n", err)
@@ -50,6 +51,8 @@ func main() {
 	endpointGetChirps(serveMux, state)
 	endpointGetChirp(serveMux, state)
 	endpointLogin(serveMux, state)
+	endpointRefresh(serveMux, state)
+	endpointRevoke(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port

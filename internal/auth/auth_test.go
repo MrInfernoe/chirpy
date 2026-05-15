@@ -104,7 +104,7 @@ func TestJWT(t *testing.T) {
 	for _, test := range cases {
 		runOk := t.Run(test.name, func(t *testing.T) {
 
-			JWT, err := auth.MakeJWT(test.make.userId, test.make.tokenSecret, test.make.expiresIn)
+			JWT, err := auth.MakeJWT(test.make.userId, test.make.tokenSecret) //, test.make.expiresIn)
 			if err != nil {
 				t.Errorf("could not make JWT: %v\n", err)
 			}

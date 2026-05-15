@@ -1,10 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/MrInfernoe/Chirpy/internal/auth"
 	"github.com/MrInfernoe/Chirpy/internal/database"
@@ -146,11 +148,12 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 
 	sm.HandleFunc(http.MethodPost+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
 
-		reqData := database.CreateUserParams{}
-		// reqData := struct {
-		// 	Email    string `json:"email"`
-		// 	Password string `json:"password"`
-		// }{}
+		type reqFields struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+		var reqData reqFields
+		// reqData := database.CreateUserParams{}
 		decoder := json.NewDecoder(req.Body)
 		err := decoder.Decode(&reqData)
 		if err != nil {
@@ -171,7 +174,14 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 			errServer(resw, "could not hash password", err)
 		}
 
-		createdUser, err := s.DbQ.CreateUser(req.Context(), reqData)
+		reqUser := database.CreateUserParams{
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+			Email:     reqData.Email,
+			Password:  reqData.Password,
+		}
+
+		userWithoutPassword, err := s.DbQ.CreateUser(req.Context(), reqUser)
 		if err != nil {
 			// conflict if (i know almost impossible) duplicate user_id generated
 			// retry will pass through
@@ -180,7 +190,7 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 			return
 		}
 
-		resData, err := json.Marshal(&createdUser)
+		resData, err := json.Marshal(&userWithoutPassword)
 		if err != nil {
 			// fmt.Printf("error encoding user: %v\n", err)
 			errServer(resw, "could not encode response", err)
@@ -196,15 +206,28 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 func endpointChirps(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodPost+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
 
-		// type errChirp struct {
-		// 	Error string `json:"error"`
-		// }
+		bearerToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			errClient(resw, err.Error())
+			return
+		}
 
-		var reqData database.CreateChirpParams
+		type reqFields struct {
+			Body string `json:"body"`
+		}
+
+		var reqData reqFields
 		decoder := json.NewDecoder(req.Body)
-		err := decoder.Decode(&reqData)
+		err = decoder.Decode(&reqData)
 		if err != nil {
 			errServer(resw, "could not decode request", err)
+			return
+		}
+
+		userId, err := auth.ValidateJWT(bearerToken, s.Config.TokenSecret)
+		if err != nil {
+			http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+			// errServer(resw, "could not validate", err)
 			return
 		}
 
@@ -228,9 +251,14 @@ func endpointChirps(sm *http.ServeMux, s *State) {
 			}
 		}
 
-		// chirpParams := database.CreateChirpParams{Body: reqBody, UserID: reqData.UserID}
-		reqData.Body = reqBody
-		createdChirp, err := s.DbQ.CreateChirp(req.Context(), reqData)
+		chirpParams := database.CreateChirpParams{
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+			Body:      reqBody,
+			UserID:    userId,
+		}
+
+		createdChirp, err := s.DbQ.CreateChirp(req.Context(), chirpParams)
 		if err != nil {
 			errServer(resw, "could not create chirp", err)
 			return
@@ -288,7 +316,6 @@ func endpointGetChirp(sm *http.ServeMux, s *State) {
 			return
 		}
 
-		// error here --------------------------------------
 		// get chirp from database
 		chirp, err := s.DbQ.GetChirp(req.Context(), chirp_id)
 		if err != nil {
@@ -316,7 +343,12 @@ func endpointGetChirp(sm *http.ServeMux, s *State) {
 func endpointLogin(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodPost+" /api/login", func(resw http.ResponseWriter, req *http.Request) {
 
-		var reqData database.CreateUserParams
+		type reqFields struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		var reqData reqFields
 		decoder := json.NewDecoder(req.Body)
 		err := decoder.Decode(&reqData)
 		if err != nil {
@@ -325,15 +357,14 @@ func endpointLogin(sm *http.ServeMux, s *State) {
 		}
 
 		userWithPassword, err := s.DbQ.GetUserWithPassword(req.Context(), reqData.Email)
-
 		// check if err not nil
 		if err != nil {
 			// check if found from email
-			if err.Error() != "not found" {
+			if err.Error() == "not found" {
 				http.Error(resw, "incorrect password or email", http.StatusUnauthorized)
 				return
 			}
-			errServer(resw, "could not get user: err", err)
+			errServer(resw, "could not get user", err)
 			return
 		}
 
@@ -349,7 +380,46 @@ func endpointLogin(sm *http.ServeMux, s *State) {
 			return
 		}
 
-		userWithoutPassword := database.CreateUserRow{ID: userWithPassword.ID, CreatedAt: userWithPassword.CreatedAt, UpdatedAt: userWithPassword.UpdatedAt, Email: userWithPassword.Email}
+		tokenString, err := auth.MakeJWT(userWithPassword.ID, s.Config.TokenSecret)
+		if err != nil {
+			errServer(resw, "could not create token", err)
+			return
+		}
+
+		refreshToken := auth.MakeRefreshToken()
+
+		RTParams := database.CreateRefreshTokenParams{
+			Token:     refreshToken,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+			UserID:    userWithPassword.ID,
+			ExpiresAt: time.Now().UTC().Add(60 * 24 * time.Hour),
+		}
+
+		createdRefreshToken, err := s.DbQ.CreateRefreshToken(req.Context(), RTParams)
+		if err != nil {
+			errServer(resw, "could not add refresh token to database", err)
+			return
+		}
+
+		type resFields struct {
+			ID           uuid.UUID `json:"id"`
+			CreatedAt    time.Time `json:"created_at"`
+			UpdatedAt    time.Time `json:"updated_at"`
+			Email        string    `json:"email"`
+			Token        string    `json:"token"`
+			RefreshToken string    `json:"refresh_token"`
+		}
+
+		userWithoutPassword := resFields{
+			ID:           userWithPassword.ID,
+			CreatedAt:    userWithPassword.CreatedAt,
+			UpdatedAt:    userWithPassword.UpdatedAt,
+			Email:        userWithPassword.Email,
+			Token:        tokenString,
+			RefreshToken: createdRefreshToken.Token,
+		}
+
 		reswData, err := json.Marshal(&userWithoutPassword)
 		if err != nil {
 			errServer(resw, "could not encode response", err)
@@ -359,5 +429,87 @@ func endpointLogin(sm *http.ServeMux, s *State) {
 		resw.Header().Set("Content-Type", "application/json")
 		resw.WriteHeader(http.StatusOK)
 		resw.Write(reswData)
+	})
+}
+
+func endpointRefresh(sm *http.ServeMux, s *State) {
+
+	sm.HandleFunc(http.MethodPost+" /api/refresh", func(resw http.ResponseWriter, req *http.Request) {
+
+		bearerToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			errClient(resw, err.Error())
+			return
+		}
+
+		foundRefreshToken, err := s.DbQ.GetRefreshToken(req.Context(), bearerToken)
+		if err != nil {
+			http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		currentTime := time.Now().UTC()
+		expiredTime := foundRefreshToken.ExpiresAt.UTC()
+		revokedTime := foundRefreshToken.RevokedAt.Time.UTC()
+		isRevoked := foundRefreshToken.RevokedAt.Valid
+		if currentTime.After(expiredTime) || (isRevoked && currentTime.After(revokedTime)) {
+			http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		// if isRevoked && currentTime.After(revokedTime) {
+		// 	http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
+
+		createdAccessToken, err := auth.MakeJWT(foundRefreshToken.UserID, s.Config.TokenSecret)
+		if err != nil {
+			errServer(resw, "could not create access token", err)
+		}
+
+		type reswFields struct {
+			AccessToken string `json:"token"`
+		}
+
+		accessToken := reswFields{
+			AccessToken: createdAccessToken,
+		}
+
+		reswData, err := json.Marshal(&accessToken)
+		if err != nil {
+			errServer(resw, "could not encode response", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusOK)
+		resw.Write(reswData)
+	})
+}
+
+func endpointRevoke(sm *http.ServeMux, s *State) {
+
+	sm.HandleFunc(http.MethodPost+" /api/revoke", func(resw http.ResponseWriter, req *http.Request) {
+
+		bearerToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			errClient(resw, err.Error())
+			return
+		}
+
+		revokeParams := database.RevokeTokenParams{
+			Token: bearerToken,
+			RevokedAt: sql.NullTime{
+				Time:  time.Now().UTC(),
+				Valid: true,
+			},
+		}
+
+		_, err = s.DbQ.RevokeToken(req.Context(), revokeParams)
+		if err != nil {
+			errServer(resw, "could not revoke token", err)
+			return
+		}
+
+		resw.WriteHeader(http.StatusNoContent)
 	})
 }

@@ -1,6 +1,7 @@
 apiconfig
 scripts
 cmd/cmd
+appCmds
 
 # secrets
 .env

@@ -12,6 +12,7 @@ type ApiConfig struct {
 	FileserverHits atomic.Int32
 	DbURL          string
 	Platform       string
+	TokenSecret    string
 }
 
 type State struct {

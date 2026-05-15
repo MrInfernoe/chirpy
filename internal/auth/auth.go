@@ -1,22 +1,17 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
-
-const task = `
-func HashPassword(password string) (string, error): Hash the password using the argon2id.CreateHash 
-function.
-
-func CheckPasswordHash(password, hash string) (bool, error): Use the argon2id.ComparePasswordAndHash 
-function to compare the password that the user entered in the HTTP request with the password that is 
-stored in the database.
-`
 
 func HashPassword(password string) (string, error) {
 	params := argon2id.DefaultParams
@@ -40,15 +35,15 @@ func CheckPasswordHash(password, hash string) (bool, error) {
 	}
 }
 
-func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
+func MakeJWT(userID uuid.UUID, tokenSecret string) (string, error) {
 
-	time_UTC := time.Now().UTC()
+	currentTime := time.Now().UTC()
 	newToken := jwt.NewWithClaims(
 		jwt.SigningMethodHS256,
 		jwt.RegisteredClaims{
 			Issuer:    "chirpy-access",
-			IssuedAt:  jwt.NewNumericDate(time_UTC),
-			ExpiresAt: jwt.NewNumericDate(time_UTC.Add(expiresIn)),
+			IssuedAt:  jwt.NewNumericDate(currentTime),
+			ExpiresAt: jwt.NewNumericDate(currentTime.Add(1 * time.Hour)),
 			Subject:   userID.String(),
 		},
 	)
@@ -64,9 +59,9 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 
-	claims := jwt.RegisteredClaims{}
+	regClaims := jwt.RegisteredClaims{}
 
-	token, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (any, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &regClaims, func(token *jwt.Token) (any, error) {
 		secretInBytes := []byte(tokenSecret)
 		return secretInBytes, nil
 	})
@@ -77,10 +72,30 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	if claims, ok := token.Claims.(*jwt.RegisteredClaims); !ok {
 		return uuid.UUID{}, fmt.Errorf("cannot get claims")
 	} else {
+		if time.Now().UTC().After(claims.ExpiresAt.Time.UTC()) {
+			return uuid.UUID{}, fmt.Errorf("expired")
+		}
 		userID, err := uuid.Parse(claims.Subject)
 		if err != nil {
 			return uuid.UUID{}, err
 		}
 		return userID, nil
 	}
+}
+
+func GetBearerToken(headers http.Header) (string, error) {
+
+	tokenString := headers.Get("Authorization")
+	if tokenString == "" {
+		return "", fmt.Errorf("no authorization token found")
+	}
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	return tokenString, nil
+}
+
+func MakeRefreshToken() string {
+
+	ranBytes := make([]byte, 32)
+	rand.Read(ranBytes)
+	return hex.EncodeToString(ranBytes)
 }
