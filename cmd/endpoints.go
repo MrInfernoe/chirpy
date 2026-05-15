@@ -167,11 +167,13 @@ func endpointUsers(sm *http.ServeMux, s *State) {
 
 		if reqData.Password == "" {
 			http.Error(resw, "password is empty", http.StatusBadRequest)
+			return
 		}
 
 		reqData.Password, err = auth.HashPassword(reqData.Password)
 		if err != nil {
 			errServer(resw, "could not hash password", err)
+			return
 		}
 
 		reqUser := database.CreateUserParams{
@@ -511,5 +513,146 @@ func endpointRevoke(sm *http.ServeMux, s *State) {
 		}
 
 		resw.WriteHeader(http.StatusNoContent)
+	})
+}
+
+func endpointUsersUpdate(sm *http.ServeMux, s *State) {
+
+	sm.HandleFunc(http.MethodPut+" /api/users", func(resw http.ResponseWriter, req *http.Request) {
+
+		bearerToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			if err.Error() == "no authorization token found" {
+				http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			errClient(resw, err.Error())
+			return
+		}
+
+		userId, err := auth.ValidateJWT(bearerToken, s.Config.TokenSecret)
+		if err != nil {
+			http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		type reqFields struct {
+			Email    string `json:"email"`
+			Password string `json:"password"`
+		}
+
+		var reqData reqFields
+		decoder := json.NewDecoder(req.Body)
+		err = decoder.Decode(&reqData)
+		if err != nil {
+			errServer(resw, "could not decode: %v\n", err)
+			return
+		}
+
+		if reqData.Email == "" {
+			http.Error(resw, "email is empty", http.StatusBadRequest)
+			return
+		}
+		if reqData.Password == "" {
+			http.Error(resw, "password is empty", http.StatusBadRequest)
+			return
+		}
+		hashword, err := auth.HashPassword(reqData.Password)
+		if err != nil {
+			errServer(resw, "could not hash password", err)
+			return
+		}
+
+		userParams := database.UpdateEmailPasswordParams{
+			ID:        userId,
+			Email:     reqData.Email,
+			Password:  hashword,
+			UpdatedAt: time.Now().UTC(),
+		}
+
+		updatedUserWithoutPassword, err := s.DbQ.UpdateEmailPassword(req.Context(), userParams)
+		if err != nil {
+			errServer(resw, "could not update database", err)
+			return
+		}
+
+		reswBytes, err := json.Marshal(&updatedUserWithoutPassword)
+		if err != nil {
+			errServer(resw, "could not encode response", err)
+			return
+		}
+
+		resw.Header().Set("Content-Type", "application/json")
+		resw.WriteHeader(http.StatusOK)
+		resw.Write(reswBytes)
+	})
+}
+
+func endpointDeleteChirp(sm *http.ServeMux, s *State) {
+	sm.HandleFunc(http.MethodDelete+" /api/chirps/{chirp_id}", func(resw http.ResponseWriter, req *http.Request) {
+
+		bearerToken, err := auth.GetBearerToken(req.Header)
+		if err != nil {
+			http.Error(resw, "401 Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tokenUserId, err := auth.ValidateJWT(bearerToken, s.Config.TokenSecret)
+		if err != nil {
+			errClient(resw, "could not validate token")
+			return
+		}
+
+		// get chirp id from request pattern
+		chirp_id_string := req.PathValue("chirp_id")
+
+		// check if chirp id is not empty
+		if chirp_id_string == "" {
+			errClient(resw, "no chirp id given")
+			return
+		}
+
+		// convert to chirp uuid
+		chirpId, err := uuid.Parse(chirp_id_string)
+		if err != nil {
+			errServer(resw, "could not parse string", err)
+			return
+		}
+
+		// get chirp from database
+		chirp, err := s.DbQ.GetChirp(req.Context(), chirpId)
+		if err != nil {
+			if err.Error() == "sql: no rows in result set" {
+				http.Error(resw, "chirp not found", http.StatusNotFound)
+				return
+			}
+			errServer(resw, "could not get chirp", err)
+			return
+		}
+
+		if chirp.UserID != tokenUserId {
+			http.Error(resw, "403 Forbidden", http.StatusForbidden)
+			return
+		}
+
+		delChirpParams := database.DeleteChirpParams{
+			ID:     chirp.ID,
+			UserID: tokenUserId,
+		}
+		_, err = s.DbQ.DeleteChirp(req.Context(), delChirpParams)
+		if err != nil {
+			errServer(resw, "could not delete chirp", err)
+			return
+		}
+
+		// encode chirp
+		// resData, err := json.Marshal(&deletedChirp)
+		// if err != nil {
+		// 	errServer(resw, "could not encode response", err)
+		// }
+
+		// write response
+		resw.WriteHeader(http.StatusNoContent)
+		// resw.Write(resData)
 	})
 }

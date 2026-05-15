@@ -53,6 +53,8 @@ func main() {
 	endpointLogin(serveMux, state)
 	endpointRefresh(serveMux, state)
 	endpointRevoke(serveMux, state)
+	endpointUsersUpdate(serveMux, state)
+	endpointDeleteChirp(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port
