@@ -411,6 +411,7 @@ func endpointLogin(sm *http.ServeMux, s *State) {
 			Email        string    `json:"email"`
 			Token        string    `json:"token"`
 			RefreshToken string    `json:"refresh_token"`
+			IsChirpyRed  bool      `json:"is_chirpy_red"`
 		}
 
 		userWithoutPassword := resFields{
@@ -420,6 +421,7 @@ func endpointLogin(sm *http.ServeMux, s *State) {
 			Email:        userWithPassword.Email,
 			Token:        tokenString,
 			RefreshToken: createdRefreshToken.Token,
+			IsChirpyRed:  userWithPassword.IsChirpyRed,
 		}
 
 		reswData, err := json.Marshal(&userWithoutPassword)
@@ -654,5 +656,52 @@ func endpointDeleteChirp(sm *http.ServeMux, s *State) {
 		// write response
 		resw.WriteHeader(http.StatusNoContent)
 		// resw.Write(resData)
+	})
+}
+
+func endpointPolkaWebhook(sm *http.ServeMux, s *State) {
+
+	sm.HandleFunc(http.MethodPost+" /api/polka/webhooks", func(resw http.ResponseWriter, req *http.Request) {
+
+		type reqFields struct {
+			Event string `json:"event"`
+			Data  struct {
+				UserId string `json:"user_id"`
+			} `json:"data"`
+		}
+
+		var reqData reqFields
+		decoder := json.NewDecoder(req.Body)
+		err := decoder.Decode(&reqData)
+		if err != nil {
+			errServer(resw, "could not decode request", err)
+			return
+		}
+
+		if reqData.Event != "user.upgraded" {
+			http.Error(resw, "", http.StatusNoContent)
+			return
+		} else {
+			userId, err := uuid.Parse(reqData.Data.UserId)
+			if err != nil {
+				errServer(resw, "could not parse user id", err)
+				return
+			}
+			redParams := database.UpgradeToRedParams{
+				ID:        userId,
+				UpdatedAt: time.Now().UTC(),
+			}
+			err = s.DbQ.UpgradeToRed(req.Context(), redParams)
+			if err != nil {
+				if err.Error() == "sql: no rows in result set" {
+					http.Error(resw, "user not found", http.StatusNotFound)
+					return
+				}
+				errServer(resw, "could not upgrade user to red in database", err)
+				return
+			}
+		}
+
+		resw.WriteHeader(http.StatusNoContent)
 	})
 }

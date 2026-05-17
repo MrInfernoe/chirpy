@@ -55,6 +55,7 @@ func main() {
 	endpointRevoke(serveMux, state)
 	endpointUsersUpdate(serveMux, state)
 	endpointDeleteChirp(serveMux, state)
+	endpointPolkaWebhook(serveMux, state)
 
 	server := http.Server{}
 	server.Addr = port
