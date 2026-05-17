@@ -279,12 +279,32 @@ func endpointChirps(sm *http.ServeMux, s *State) {
 }
 
 func endpointGetChirps(sm *http.ServeMux, s *State) {
+
 	sm.HandleFunc(http.MethodGet+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
 
-		chirps, err := s.DbQ.GetChirps(req.Context())
-		if err != nil {
-			errServer(resw, "could not get chirps", err)
-			return
+		authorID := req.URL.Query().Get("author_id")
+		var chirps []database.Chirp
+		if authorID != "" {
+			userId, err := uuid.Parse(authorID)
+			if err != nil {
+				errServer(resw, "could not parse id string", err)
+				return
+			}
+
+			foundChirps, err := s.DbQ.GetChirpsByUser(req.Context(), userId)
+			if err != nil {
+				errServer(resw, "could not get chirps", err)
+				return
+			}
+			chirps = foundChirps
+		} else {
+
+			foundChirps, err := s.DbQ.GetChirps(req.Context())
+			if err != nil {
+				errServer(resw, "could not get chirps", err)
+				return
+			}
+			chirps = foundChirps
 		}
 
 		resData, err := json.Marshal(&chirps)
@@ -663,6 +683,12 @@ func endpointPolkaWebhook(sm *http.ServeMux, s *State) {
 
 	sm.HandleFunc(http.MethodPost+" /api/polka/webhooks", func(resw http.ResponseWriter, req *http.Request) {
 
+		apiKey, err := auth.GetAPIKey(req.Header)
+		if err != nil || apiKey != s.Config.PolkaKey {
+			http.Error(resw, "", http.StatusUnauthorized)
+			return
+		}
+
 		type reqFields struct {
 			Event string `json:"event"`
 			Data  struct {
@@ -672,7 +698,7 @@ func endpointPolkaWebhook(sm *http.ServeMux, s *State) {
 
 		var reqData reqFields
 		decoder := json.NewDecoder(req.Body)
-		err := decoder.Decode(&reqData)
+		err = decoder.Decode(&reqData)
 		if err != nil {
 			errServer(resw, "could not decode request", err)
 			return

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"net/http"
 	"sync/atomic"
 
@@ -13,6 +12,7 @@ type ApiConfig struct {
 	DbURL          string
 	Platform       string
 	TokenSecret    string
+	PolkaKey       string
 }
 
 type State struct {
@@ -25,8 +25,4 @@ func (cfg *ApiConfig) MiddlewareMetricsInc(next http.Handler) http.Handler {
 		cfg.FileserverHits.Add(1)
 		next.ServeHTTP(resw, req)
 	})
-}
-
-func HandlerRegister(s State) error {
-	return fmt.Errorf("")
 }

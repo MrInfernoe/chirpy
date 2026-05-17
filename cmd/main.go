@@ -29,6 +29,7 @@ func main() {
 	state.Config.Platform = os.Getenv("PLATFORM")
 	state.Config.DbURL = os.Getenv("DB_URL")
 	state.Config.TokenSecret = os.Getenv("TOKEN_SECRET")
+	state.Config.PolkaKey = os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", state.Config.DbURL)
 	if err != nil {
 		fmt.Printf("could not open database: %v\n", err)

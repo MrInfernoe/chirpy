@@ -85,12 +85,26 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 
 func GetBearerToken(headers http.Header) (string, error) {
 
-	tokenString := headers.Get("Authorization")
-	if tokenString == "" {
-		return "", fmt.Errorf("no authorization token found")
+	authHeader := headers.Get("Authorization")
+	fields := strings.Fields(authHeader)
+	var token string
+	for i, field := range fields {
+		if field == "Bearer" {
+			token = fields[i+1]
+			break
+		}
 	}
-	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-	return tokenString, nil
+	if token == "" {
+		return "", fmt.Errorf("could not find token")
+	}
+	return token, nil
+
+	// tokenString := headers.Get("Authorization")
+	// if tokenString == "" {
+	// 	return "", fmt.Errorf("no authorization token found")
+	// }
+	// tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+	// return tokenString, nil
 }
 
 func MakeRefreshToken() string {
@@ -98,4 +112,20 @@ func MakeRefreshToken() string {
 	ranBytes := make([]byte, 32)
 	rand.Read(ranBytes)
 	return hex.EncodeToString(ranBytes)
+}
+
+func GetAPIKey(headers http.Header) (string, error) {
+	authHeader := headers.Get("Authorization")
+	fields := strings.Fields(authHeader)
+	var APIKey string
+	for i, field := range fields {
+		if field == "ApiKey" {
+			APIKey = fields[i+1]
+			break
+		}
+	}
+	if APIKey == "" {
+		return "", fmt.Errorf("could not find ApiKey")
+	}
+	return APIKey, nil
 }
