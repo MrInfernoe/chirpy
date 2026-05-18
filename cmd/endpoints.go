@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -283,6 +284,7 @@ func endpointGetChirps(sm *http.ServeMux, s *State) {
 	sm.HandleFunc(http.MethodGet+" /api/chirps", func(resw http.ResponseWriter, req *http.Request) {
 
 		authorID := req.URL.Query().Get("author_id")
+
 		var chirps []database.Chirp
 		if authorID != "" {
 			userId, err := uuid.Parse(authorID)
@@ -305,6 +307,13 @@ func endpointGetChirps(sm *http.ServeMux, s *State) {
 				return
 			}
 			chirps = foundChirps
+		}
+
+		order := req.URL.Query().Get("sort")
+		if order == "desc" {
+			sort.Slice(chirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+		} else if order != "asc" {
+			errClient(resw, fmt.Sprintf("could not sort by \"%v\"", order))
 		}
 
 		resData, err := json.Marshal(&chirps)
